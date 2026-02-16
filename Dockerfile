@@ -22,14 +22,17 @@ RUN wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Mi
 
 ENV PATH="/opt/conda/bin:$PATH"
 
-# Install MFA with Python 3.10 (required for scikit-learn compatibility)
+# Install MFA (latest compatible version, let conda resolve dependencies)
 RUN conda create -n mfa python=3.10 -y \
-    && conda run -n mfa conda install -c conda-forge montreal-forced-aligner=3.1.0 -y \
+    && conda run -n mfa conda install -c conda-forge montreal-forced-aligner -y \
     && conda clean -afy
 
 # Make mfa environment default
 ENV PATH="/opt/conda/envs/mfa/bin:$PATH"
 ENV CONDA_DEFAULT_ENV=mfa
+
+# Verify MFA works
+RUN mfa version
 
 # Download pretrained models (при билде, не при старте!)
 # English
