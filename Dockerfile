@@ -22,17 +22,18 @@ RUN wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Mi
 
 ENV PATH="/opt/conda/bin:$PATH"
 
-# Install MFA (latest compatible version, let conda resolve dependencies)
+# Install MFA + pin setuptools<70 (setuptools 82+ removed pkg_resources, breaks MFA)
 RUN conda create -n mfa python=3.10 -y \
     && conda run -n mfa conda install -c conda-forge montreal-forced-aligner -y \
-    && conda clean -afy
+    && conda clean -afy \
+    && /opt/conda/envs/mfa/bin/pip install "setuptools<70"
 
 # Make mfa environment default
 ENV PATH="/opt/conda/envs/mfa/bin:$PATH"
 ENV CONDA_DEFAULT_ENV=mfa
 
-# Verify MFA works
-RUN mfa version
+# Verify MFA and pkg_resources work
+RUN mfa version && python -c "import pkg_resources; print('pkg_resources OK')"
 
 # Download pretrained models (при билде, не при старте!)
 # English
