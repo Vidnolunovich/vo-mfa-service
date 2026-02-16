@@ -8,16 +8,17 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
     wget \
+    bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install conda (required for MFA)
-RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh \
-    && bash /tmp/miniconda.sh -b -p /opt/conda \
-    && rm /tmp/miniconda.sh
+# Install Miniforge (conda-forge only, no Anaconda ToS required)
+RUN wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/miniforge.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/conda \
+    && rm /tmp/miniforge.sh
 
 ENV PATH="/opt/conda/bin:$PATH"
 
-# Install MFA via conda
+# Install MFA via conda-forge
 RUN conda install -c conda-forge montreal-forced-aligner=3.1.0 -y \
     && conda clean -afy
 
