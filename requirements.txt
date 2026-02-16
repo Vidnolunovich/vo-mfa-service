@@ -9,8 +9,8 @@ soundfile==0.12.1
 numpy==1.26.3
 scipy==1.12.0
 
-# Montreal Forced Aligner
-montreal-forced-aligner==3.1.0
+# MFA устанавливается через conda в Dockerfile — НЕ дублировать через pip!
+# montreal-forced-aligner==3.1.0  ← REMOVED: конфликт с conda, ломает pkg_resources
 
 # TextGrid parsing
 textgrid==1.6.1
@@ -21,3 +21,6 @@ google-cloud-storage==2.14.0
 # Utilities
 pydantic==2.5.3
 pydantic-settings==2.1.0
+
+# Гарантируем наличие setuptools (pkg_resources)
+setuptools>=69.0.0
