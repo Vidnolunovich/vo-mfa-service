@@ -1,7 +1,10 @@
 # MFA Service Dockerfile
 # Builds a container with Montreal Forced Aligner and pretrained models
 
-FROM python:3.10-slim
+FROM ubuntu:22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -9,18 +12,24 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     wget \
     bzip2 \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Miniforge (conda-forge only, no Anaconda ToS required)
+# Install Miniforge
 RUN wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/miniforge.sh \
     && bash /tmp/miniforge.sh -b -p /opt/conda \
     && rm /tmp/miniforge.sh
 
 ENV PATH="/opt/conda/bin:$PATH"
 
-# Install MFA via conda-forge
-RUN conda install -c conda-forge montreal-forced-aligner=3.1.0 -y \
+# Install MFA with Python 3.10 (required for scikit-learn compatibility)
+RUN conda create -n mfa python=3.10 -y \
+    && conda run -n mfa conda install -c conda-forge montreal-forced-aligner=3.1.0 -y \
     && conda clean -afy
+
+# Make mfa environment default
+ENV PATH="/opt/conda/envs/mfa/bin:$PATH"
+ENV CONDA_DEFAULT_ENV=mfa
 
 # Download pretrained models (при билде, не при старте!)
 # English
@@ -46,7 +55,7 @@ RUN mfa model download acoustic portuguese_mfa \
 # Set MFA environment
 ENV MFA_ROOT_DIR=/root/Documents/MFA
 
-# Install Python dependencies
+# Install Python dependencies for FastAPI
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
