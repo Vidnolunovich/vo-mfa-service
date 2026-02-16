@@ -58,10 +58,10 @@ RUN mfa model download acoustic portuguese_mfa \
 # Set MFA environment
 ENV MFA_ROOT_DIR=/root/Documents/MFA
 
-# Install Python dependencies for FastAPI
+# Install Python dependencies for FastAPI — в mfa env явно!
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN /opt/conda/envs/mfa/bin/pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY main.py .
