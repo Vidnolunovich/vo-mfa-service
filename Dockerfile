@@ -1,5 +1,6 @@
 # MFA Service Dockerfile
 # Builds a container with Montreal Forced Aligner and pretrained models
+# Оптимизация: PostgreSQL server инициализируется при билде
 
 FROM ubuntu:22.04
 
@@ -59,6 +60,9 @@ RUN mfa model download acoustic portuguese_mfa \
 # Set MFA environment
 ENV MFA_ROOT_DIR=/root/Documents/MFA
 
+# Initialize PostgreSQL server at build time (faster cold start)
+RUN mfa server init
+
 # Install Python dependencies for FastAPI — в mfa env явно!
 WORKDIR /app
 COPY requirements.txt .
@@ -69,8 +73,12 @@ COPY main.py .
 COPY aligner.py .
 COPY rms_refiner.py .
 
+# Create startup script
+RUN echo '#!/bin/bash\nmfa server start\nuvicorn main:app --host 0.0.0.0 --port 8080' > /app/start.sh \
+    && chmod +x /app/start.sh
+
 # Expose port
 EXPOSE 8080
 
-# Run the server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Run the server with PostgreSQL
+CMD ["/app/start.sh"]

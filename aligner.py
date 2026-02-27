@@ -2,6 +2,9 @@
 MFA Wrapper - обёртка над Montreal Forced Aligner
 
 Поддерживаемые языки: EN, RU, ES, DE, PT
+
+Оптимизация: используем align_one вместо align для одиночных файлов
+(пропускает corpus setup, быстрее для single-file alignment)
 """
 
 import os
@@ -47,6 +50,7 @@ class MFAAligner:
     Обёртка над MFA CLI для forced alignment.
     
     Модели загружаются при билде Docker образа.
+    PostgreSQL server запускается при старте контейнера.
     """
     
     def __init__(self):
@@ -55,13 +59,10 @@ class MFAAligner:
     
     def _verify_models(self):
         """Проверяем что модели загружены"""
-        # MFA хранит модели в ~/Documents/MFA или задаётся через MFA_ROOT_DIR
         mfa_root = os.environ.get("MFA_ROOT_DIR", os.path.expanduser("~/Documents/MFA"))
         print(f"[MFA] Models directory: {mfa_root}")
         
-        # Проверяем наличие acoustic моделей
         for lang, models in LANGUAGE_MODELS.items():
-            # MFA 3.x хранит модели по-другому, просто логируем
             print(f"[MFA] Language {lang}: acoustic={models['acoustic']}, dict={models['dictionary']}")
     
     def get_model_name(self, language: str) -> str:
@@ -93,65 +94,71 @@ class MFAAligner:
         models = LANGUAGE_MODELS[language]
         
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Подготовка директорий
-            input_dir = os.path.join(tmpdir, "input")
-            output_dir = os.path.join(tmpdir, "output")
-            os.makedirs(input_dir)
-            os.makedirs(output_dir)
+            # Подготовка файлов (align_one работает с файлами напрямую)
+            audio_resampled = os.path.join(tmpdir, "audio.wav")
+            transcript_path = os.path.join(tmpdir, "audio.txt")
+            output_textgrid = os.path.join(tmpdir, "audio.TextGrid")
             
             # Resample аудио до 16kHz если нужно
-            resampled_path = os.path.join(input_dir, "audio.wav")
-            self._resample_audio(audio_path, resampled_path, input_sample_rate)
+            self._resample_audio(audio_path, audio_resampled, input_sample_rate)
             
-            # Создаём файл транскрипта (.lab или .txt)
-            transcript_path = os.path.join(input_dir, "audio.txt")
+            # Создаём файл транскрипта
             with open(transcript_path, "w", encoding="utf-8") as f:
                 f.write(transcript)
             
-            # Запускаем MFA
+            # Запускаем MFA align_one
             self._run_mfa(
-                input_dir=input_dir,
-                output_dir=output_dir,
+                audio_path=audio_resampled,
+                transcript_path=transcript_path,
+                output_path=output_textgrid,
                 acoustic_model=models["acoustic"],
                 dictionary=models["dictionary"]
             )
             
             # Парсим результат (TextGrid)
-            textgrid_path = os.path.join(output_dir, "audio.TextGrid")
-            if not os.path.exists(textgrid_path):
-                raise RuntimeError(f"MFA did not produce output: {textgrid_path}")
+            if not os.path.exists(output_textgrid):
+                raise RuntimeError(f"MFA did not produce output: {output_textgrid}")
             
-            words = self._parse_textgrid(textgrid_path)
+            words = self._parse_textgrid(output_textgrid)
             
             return words
     
     def _resample_audio(self, input_path: str, output_path: str, input_sr: int):
         """Resample аудио до 16kHz для MFA"""
         if input_sr == MFA_SAMPLE_RATE:
-            # Просто копируем
             import shutil
             shutil.copy(input_path, output_path)
             return
         
-        # Загружаем и ресэмплируем
         y, sr = librosa.load(input_path, sr=input_sr, mono=True)
         y_resampled = librosa.resample(y, orig_sr=sr, target_sr=MFA_SAMPLE_RATE)
         
-        # Сохраняем
         sf.write(output_path, y_resampled, MFA_SAMPLE_RATE, subtype='PCM_16')
         print(f"[MFA] Resampled {input_sr}Hz -> {MFA_SAMPLE_RATE}Hz")
     
-    def _run_mfa(self, input_dir: str, output_dir: str, acoustic_model: str, dictionary: str):
-        """Запускает MFA CLI"""
+    def _run_mfa(
+        self, 
+        audio_path: str, 
+        transcript_path: str, 
+        output_path: str,
+        acoustic_model: str, 
+        dictionary: str
+    ):
+        """
+        Запускает MFA CLI с командой align_one.
+        
+        align_one оптимизирован для одиночных файлов:
+        - Пропускает corpus setup
+        - Не использует speaker adaptation
+        - Значительно быстрее для нашего use case
+        """
         cmd = [
-            "mfa", "align",
-            input_dir,
+            "mfa", "align_one",
+            audio_path,
+            transcript_path,
             dictionary,
             acoustic_model,
-            output_dir,
-            "--clean",
-            "--single_speaker",
-            "--output_format", "long_textgrid"
+            output_path
         ]
         
         print(f"[MFA] Running: {' '.join(cmd)}")
@@ -165,6 +172,7 @@ class MFAAligner:
         
         if result.returncode != 0:
             print(f"[MFA] STDERR: {result.stderr}")
+            print(f"[MFA] STDOUT: {result.stdout}")
             raise RuntimeError(f"MFA failed: {result.stderr}")
         
         print(f"[MFA] Alignment complete")
