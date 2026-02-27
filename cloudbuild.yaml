@@ -1,15 +1,15 @@
 # Cloud Build configuration for vo-mfa-service
-# Триггерится автоматически при пуше в main
+# Для ручного запуска: gcloud builds submit --config=cloudbuild.yaml --project=gen-lang-client-0960712901
 
 steps:
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/vo-mfa-service:$COMMIT_SHA', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/vo-mfa-service:latest', '.']
     timeout: '1800s'  # 30 минут на билд (модели большие)
 
   # Push the container image to Container Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/vo-mfa-service:$COMMIT_SHA']
+    args: ['push', 'gcr.io/$PROJECT_ID/vo-mfa-service:latest']
 
   # Deploy container image to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -19,7 +19,7 @@ steps:
       - 'deploy'
       - 'vo-mfa-service'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/vo-mfa-service:$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/vo-mfa-service:latest'
       - '--region'
       - 'us-central1'
       - '--platform'
@@ -37,7 +37,7 @@ steps:
       - '--allow-unauthenticated'
 
 images:
-  - 'gcr.io/$PROJECT_ID/vo-mfa-service:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/vo-mfa-service:latest'
 
 timeout: '2400s'  # 40 минут общий таймаут
 
