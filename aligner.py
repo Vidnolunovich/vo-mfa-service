@@ -77,7 +77,7 @@ class MFAAligner:
         transcript: str,
         language: str = "en",
         input_sample_rate: int = 24000
-    ) -> List[Dict]:
+    ) -> Dict:
         """
         Выполняет forced alignment.
         
@@ -88,14 +88,17 @@ class MFAAligner:
             input_sample_rate: Sample rate входного аудио
             
         Returns:
-            List of {word, start, end} dictionaries
+            Dict с ключами:
+            - words: List of {word, start, end}
+            - timing: Dict с breakdown тайминга (resample_ms, alignment_ms, parse_ms, total_ms)
         """
         if language not in LANGUAGE_MODELS:
             raise ValueError(f"Unsupported language: {language}")
         
         models = LANGUAGE_MODELS[language]
         
-        start_time = time.time()
+        total_start = time.time()
+        timing = {}
         
         with tempfile.TemporaryDirectory() as tmpdir:
             # Подготовка файлов (align_one работает с файлами напрямую)
@@ -103,17 +106,18 @@ class MFAAligner:
             transcript_path = os.path.join(tmpdir, "audio.txt")
             output_textgrid = os.path.join(tmpdir, "audio.TextGrid")
             
-            # Resample аудио до 16kHz 16-bit через ffmpeg (быстрее librosa)
-            resample_start = time.time()
+            # --- Resample аудио до 16kHz 16-bit через ffmpeg ---
+            t0 = time.time()
             self._resample_audio_ffmpeg(audio_path, audio_resampled, input_sample_rate)
-            print(f"[MFA] Resample took {time.time() - resample_start:.2f}s")
+            timing["resample_ms"] = int((time.time() - t0) * 1000)
+            print(f"[MFA] Resample took {timing['resample_ms']}ms")
             
-            # Создаём файл транскрипта
+            # --- Создаём файл транскрипта ---
             with open(transcript_path, "w", encoding="utf-8") as f:
                 f.write(transcript)
             
-            # Запускаем MFA align_one
-            mfa_start = time.time()
+            # --- Запускаем MFA align_one ---
+            t0 = time.time()
             self._run_mfa(
                 audio_path=audio_resampled,
                 transcript_path=transcript_path,
@@ -121,17 +125,28 @@ class MFAAligner:
                 acoustic_model=models["acoustic"],
                 dictionary=models["dictionary"]
             )
-            print(f"[MFA] Alignment took {time.time() - mfa_start:.2f}s")
+            timing["alignment_ms"] = int((time.time() - t0) * 1000)
+            print(f"[MFA] Alignment took {timing['alignment_ms']}ms")
             
-            # Парсим результат (TextGrid)
+            # --- Парсим результат (TextGrid) ---
             if not os.path.exists(output_textgrid):
                 raise RuntimeError(f"MFA did not produce output: {output_textgrid}")
             
+            t0 = time.time()
             words = self._parse_textgrid(output_textgrid)
+            timing["parse_ms"] = int((time.time() - t0) * 1000)
             
-            print(f"[MFA] Total processing time: {time.time() - start_time:.2f}s")
+            timing["total_ms"] = int((time.time() - total_start) * 1000)
             
-            return words
+            print(f"[MFA] Total processing: {timing['total_ms']}ms "
+                  f"(resample={timing['resample_ms']}ms, "
+                  f"alignment={timing['alignment_ms']}ms, "
+                  f"parse={timing['parse_ms']}ms)")
+            
+            return {
+                "words": words,
+                "timing": timing
+            }
     
     def _resample_audio_ffmpeg(self, input_path: str, output_path: str, input_sr: int):
         """
