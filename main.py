@@ -9,7 +9,7 @@ import os
 import tempfile
 import base64
 import time
-from typing import Optional, List
+from typing import Optional, List, Dict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -37,11 +37,22 @@ class WordTimestamp(BaseModel):
     end: float = Field(..., description="End time in seconds")
 
 
+class TimingBreakdown(BaseModel):
+    """Детальный breakdown тайминга каждого этапа"""
+    decode_ms: int = Field(default=0, description="Base64 decode time")
+    resample_ms: int = Field(default=0, description="ffmpeg resample time")
+    alignment_ms: int = Field(default=0, description="MFA align_one time (core)")
+    parse_ms: int = Field(default=0, description="TextGrid parse time")
+    refinement_ms: int = Field(default=0, description="RMS endpoint refinement time")
+    total_ms: int = Field(default=0, description="Total server processing time")
+
+
 class AlignResponse(BaseModel):
     """Ответ с timestamps"""
     words: List[WordTimestamp]
     total_duration: float
     processing_time_ms: int
+    timing: TimingBreakdown
     model_used: str
     refined: bool
 
@@ -71,7 +82,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="MFA Alignment Service",
     description="Montreal Forced Aligner for precise word-level timestamps",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan
 )
 
@@ -84,7 +95,7 @@ async def health_check():
     return HealthResponse(
         status="healthy",
         models_loaded=aligner.available_languages if aligner else [],
-        version="1.0.0"
+        version="1.1.0"
     )
 
 
@@ -93,7 +104,7 @@ async def align_audio(request: AlignRequest):
     """
     Выполняет forced alignment аудио с транскриптом.
     
-    Возвращает точные timestamps для каждого слова.
+    Возвращает точные timestamps для каждого слова + детальный breakdown тайминга.
     """
     if not aligner:
         raise HTTPException(status_code=503, detail="Aligner not initialized")
@@ -104,11 +115,14 @@ async def align_audio(request: AlignRequest):
             detail=f"Language '{request.language}' not supported. Available: {aligner.available_languages}"
         )
     
-    start_time = time.time()
+    total_start = time.time()
+    timing_data = {}
     
     try:
-        # Decode audio
+        # --- Decode audio ---
+        t0 = time.time()
         audio_bytes = base64.b64decode(request.audio_base64)
+        timing_data["decode_ms"] = int((time.time() - t0) * 1000)
         
         # Create temp files
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -118,31 +132,51 @@ async def align_audio(request: AlignRequest):
             with open(audio_path, "wb") as f:
                 f.write(audio_bytes)
             
-            # Run alignment
-            words = aligner.align(
+            # --- Run alignment (returns dict with words + timing) ---
+            result = aligner.align(
                 audio_path=audio_path,
                 transcript=request.transcript,
                 language=request.language,
                 input_sample_rate=request.sample_rate
             )
             
-            # RMS refinement
+            words = result["words"]
+            aligner_timing = result["timing"]
+            
+            # Копируем timing из aligner
+            timing_data["resample_ms"] = aligner_timing.get("resample_ms", 0)
+            timing_data["alignment_ms"] = aligner_timing.get("alignment_ms", 0)
+            timing_data["parse_ms"] = aligner_timing.get("parse_ms", 0)
+            
+            # --- RMS refinement ---
+            timing_data["refinement_ms"] = 0
             if request.refine_endpoints and words:
+                t0 = time.time()
                 words = refine_word_endpoints(
                     audio_path=audio_path,
                     words=words,
                     sample_rate=request.sample_rate
                 )
+                timing_data["refinement_ms"] = int((time.time() - t0) * 1000)
             
             # Calculate total duration
             total_duration = words[-1]["end"] if words else 0.0
             
-            processing_time_ms = int((time.time() - start_time) * 1000)
+            timing_data["total_ms"] = int((time.time() - total_start) * 1000)
+            
+            print(f"[MFA] === TIMING BREAKDOWN ===")
+            print(f"[MFA]   decode:     {timing_data['decode_ms']}ms")
+            print(f"[MFA]   resample:   {timing_data['resample_ms']}ms")
+            print(f"[MFA]   alignment:  {timing_data['alignment_ms']}ms")
+            print(f"[MFA]   parse:      {timing_data['parse_ms']}ms")
+            print(f"[MFA]   refinement: {timing_data['refinement_ms']}ms")
+            print(f"[MFA]   TOTAL:      {timing_data['total_ms']}ms")
             
             return AlignResponse(
                 words=[WordTimestamp(**w) for w in words],
                 total_duration=total_duration,
-                processing_time_ms=processing_time_ms,
+                processing_time_ms=timing_data["total_ms"],
+                timing=TimingBreakdown(**timing_data),
                 model_used=aligner.get_model_name(request.language),
                 refined=request.refine_endpoints
             )
@@ -156,7 +190,7 @@ async def root():
     """Root endpoint"""
     return {
         "service": "MFA Alignment Service",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "endpoints": ["/health", "/align"]
     }
 
