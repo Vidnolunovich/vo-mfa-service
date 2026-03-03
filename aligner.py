@@ -8,6 +8,7 @@ MFA Wrapper - обёртка над Montreal Forced Aligner
 - ffmpeg для resample (быстрее чем librosa)
 - --uses_speaker_adaptation false (не нужен для TTS)
 - --no_textgrid_cleanup (экономим время)
+- --beam 100 (увеличен с дефолтного 10 для стабильности)
 """
 
 import os
@@ -192,6 +193,7 @@ class MFAAligner:
         - align_one: пропускает corpus setup
         - --uses_speaker_adaptation false: для TTS не нужен
         - --no_textgrid_cleanup: экономим время на постобработке
+        - --beam 100: увеличен с дефолтного 10 для стабильности
         """
         cmd = [
             "mfa", "align_one",
@@ -201,7 +203,8 @@ class MFAAligner:
             acoustic_model,
             output_path,
             "--uses_speaker_adaptation", "false",
-            "--no_textgrid_cleanup"
+            "--no_textgrid_cleanup",
+            "--beam", "100"
         ]
         
         print(f"[MFA] Running: {' '.join(cmd)}")
